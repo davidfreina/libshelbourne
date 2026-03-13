@@ -163,7 +163,12 @@ scp myapp root@<device-ip>:/tmp/
 ssh root@<device-ip> /tmp/myapp
 ```
 
-## 5. After Testing
+## 5. Auto-boot (Optional)
+
+To have the device run your app automatically on boot (replacing the
+stock Bose software), see [autoboot.md](autoboot.md).
+
+## 6. After Testing
 
 Reboot the device to restore the stock Bose software:
 

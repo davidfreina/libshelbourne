@@ -11,7 +11,7 @@ Portable.
     decoding MP3, receiving internet radio, etc.)
   * AUX input loopback (3.5mm jack to speakers)
   * Update the 128x100 8-bit grayscale OLED display
-  * Control the status LED (white, yellow, off)
+  * Control the WiFi-symbol status LED (white, yellow, off)
   * Read the keypad (volume, power, AUX, presets 1-6)
   * Suspend and resume the amplifier to save energy when "off"
   * Includes demo program and a test suite
@@ -34,6 +34,11 @@ See [docs/getting_started.md](docs/getting_started.md) for how to
 build the library, demo, and test suite and run them on the device.
 For SSH access to the device, see
 [docs/remote_access.md](docs/remote_access.md).
+
+## Auto-boot
+
+See [docs/autoboot.md](docs/autoboot.md) for how to run your app on
+startup, replacing the stock Bose software.
 
 ## API Documentation
 

@@ -171,8 +171,10 @@ Audio buffer state is preserved. Keypad remains active.
 
 ### `void shelbourne_resume(shelbourne_t *hw)`
 
-Resume from standby: power on amplifier (~3s stabilization), unmute,
-reset audio pacing. Caller should redraw display after resume.
+Resume from standby: power on amplifier, unmute, reset audio pacing.
+Returns immediately — the amplifier may produce distorted output for
+the first few seconds while it stabilizes. Caller should redraw display
+after resume.
 
 ## Display
 

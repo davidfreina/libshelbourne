@@ -215,12 +215,16 @@ static int codec_init(void)
 
 /* ── Amplifier control ────────────────────────────────────────────── */
 
-static int amp_power_on(void)
+static int amp_power_on(int wait)
 {
     write_file(GPIO_AMP_POWER, "1");
     write_file(GPIO_DM870_POWER, "0");  /* active low */
-    fprintf(stderr, "shelbourne: amp power on, stabilizing...\n");
-    sleep(3);
+    if (wait) {
+        fprintf(stderr, "shelbourne: amp power on, stabilizing...\n");
+        sleep(3);
+    } else {
+        fprintf(stderr, "shelbourne: amp power on\n");
+    }
     return 0;
 }
 
@@ -432,8 +436,8 @@ shelbourne_t *shelbourne_init(void)
         return NULL;
     }
 
-    /* Power on amplifier */
-    amp_power_on();
+    /* Power on amplifier (wait for stabilization on first init) */
+    amp_power_on(1);
 
     /* Start TX mode (clears txRunning, opens device, configures McASP) */
     if (start_tx_mode(hw) < 0) {
@@ -684,7 +688,7 @@ void shelbourne_standby(shelbourne_t *hw)
 
 void shelbourne_resume(shelbourne_t *hw)
 {
-    amp_power_on();
+    amp_power_on(0);
     write_file(GPIO_MUTE, "1");
     shelbourne_audio_reset(hw);
     hw->in_standby = 0;

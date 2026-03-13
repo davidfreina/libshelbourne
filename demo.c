@@ -497,6 +497,7 @@ int main(void)
     printf("Shelbourne Interactive Demo\n");
     printf("===========================\n\n");
 
+    int had_stock_processes = shelbourne_stock_processes_active();
     shelbourne_stop_stock_processes();
 
     hw = shelbourne_init();
@@ -562,6 +563,12 @@ int main(void)
     if (state == STATE_STANDBY)
         shelbourne_resume(hw);
     shelbourne_shutdown(hw);
+
+    if (had_stock_processes) {
+        printf("Resuming stock processes...\n");
+        shelbourne_resume_stock_processes();
+    }
+
     printf("Done.\n");
     return 0;
 }
