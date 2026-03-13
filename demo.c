@@ -342,6 +342,7 @@ static void update_display(void)
 
 static void enter_tone(int preset)
 {
+    shelbourne_mute(hw, 1);
     if (state == STATE_AUX)
         shelbourne_aux_disable(hw);
     shelbourne_audio_reset(hw);
@@ -349,6 +350,7 @@ static void enter_tone(int preset)
     state = STATE_TONE;
     phase = 0;
     shelbourne_led_set(hw, SHELBOURNE_LED_WHITE);
+    shelbourne_mute(hw, 0);
     display_dirty = 1;
     printf("Preset %d: %s (%.0f Hz)\n", preset + 1,
            notes[preset].name, notes[preset].freq);
@@ -356,20 +358,24 @@ static void enter_tone(int preset)
 
 static void enter_aux(void)
 {
+    shelbourne_mute(hw, 1);
     shelbourne_audio_reset(hw);
     if (shelbourne_aux_enable(hw) < 0) {
+        shelbourne_mute(hw, 0);
         printf("AUX enable failed\n");
         return;
     }
     state = STATE_AUX;
     current_preset = -1;
     shelbourne_led_set(hw, SHELBOURNE_LED_YELLOW);
+    shelbourne_mute(hw, 0);
     display_dirty = 1;
     printf("AUX mode\n");
 }
 
 static void enter_idle(void)
 {
+    shelbourne_mute(hw, 1);
     if (state == STATE_AUX)
         shelbourne_aux_disable(hw);
     state = STATE_IDLE;

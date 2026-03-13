@@ -672,7 +672,7 @@ void shelbourne_mute(shelbourne_t *hw, int mute)
 void shelbourne_standby(shelbourne_t *hw)
 {
     write_file(GPIO_MUTE, "0");
-    amp_power_off();
+    write_file(GPIO_AMP_POWER, "0");  /* amp off, but leave DM870 (WiFi) on */
 
     /* Blank display */
     if (hw->fb_fd >= 0) {
