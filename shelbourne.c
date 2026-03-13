@@ -8,6 +8,7 @@
 
 #include "shelbourne.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <math.h>
@@ -297,26 +298,86 @@ static void fix_keypad_timer(void)
     close(fd);
 }
 
-/* ── Process management ───────────────────────────────────────────── */
+/* ── Stock process management ────────────────────────────────────── */
 
-static void kill_stock_processes(void)
+static const char *stock_procs[] = {
+    "APServer", "BoseApp", "STSCertified", "UpnpSource",
+    "WebServer", "CLIServer", "NetManager", "scmmond",
+    "SoftwareUpdate", "IoT", "TPDA", "LegacyProduct",
+    "PtsServer", "microbswitch", "httpd", NULL
+};
+
+/* Check if a non-zombie process with the given name exists in /proc */
+static int process_running(const char *name)
+{
+    DIR *proc = opendir("/proc");
+    if (!proc) return 0;
+    struct dirent *ent;
+    while ((ent = readdir(proc)) != NULL) {
+        if (ent->d_name[0] < '1' || ent->d_name[0] > '9')
+            continue;
+        char path[64];
+        snprintf(path, sizeof(path), "/proc/%s/stat", ent->d_name);
+        int fd = open(path, O_RDONLY);
+        if (fd < 0) continue;
+        char buf[512];
+        ssize_t n = read(fd, buf, sizeof(buf) - 1);
+        close(fd);
+        if (n <= 0) continue;
+        buf[n] = '\0';
+        /* Format: "pid (comm) state ..." — find last ')' for robust parsing */
+        char *rp = strrchr(buf, ')');
+        if (!rp || rp[1] != ' ') continue;
+        if (rp[2] == 'Z') continue;  /* skip zombies */
+        /* Extract comm between first '(' and last ')' */
+        char *lp = strchr(buf, '(');
+        if (!lp) continue;
+        lp++;
+        int len = rp - lp;
+        if (len <= 0 || len != (int)strlen(name)) continue;
+        if (memcmp(lp, name, len) == 0) {
+            closedir(proc);
+            return 1;
+        }
+    }
+    closedir(proc);
+    return 0;
+}
+
+int shelbourne_stock_processes_active(void)
+{
+    for (int i = 0; stock_procs[i]; i++) {
+        if (process_running(stock_procs[i]))
+            return 1;
+    }
+    return 0;
+}
+
+void shelbourne_stop_stock_processes(void)
 {
     fprintf(stderr, "shelbourne: freezing process supervisor...\n");
     system("kill -STOP $(pidof shepherdd) 2>/dev/null");
 
     fprintf(stderr, "shelbourne: killing stock audio processes...\n");
-    const char *procs[] = {
-        "APServer", "BoseApp", "STSCertified", "UpnpSource",
-        "WebServer", "CLIServer", "NetManager", "scmmond",
-        "SoftwareUpdate", "IoT", "TPDA", "LegacyProduct",
-        "PtsServer", "microbswitch", "httpd", NULL
-    };
-    for (int i = 0; procs[i]; i++) {
+    for (int i = 0; stock_procs[i]; i++) {
         char cmd[128];
-        snprintf(cmd, sizeof(cmd), "killall -9 %s 2>/dev/null", procs[i]);
+        snprintf(cmd, sizeof(cmd), "killall -9 %s 2>/dev/null", stock_procs[i]);
         system(cmd);
     }
+
     sleep(1);
+}
+
+void shelbourne_resume_stock_processes(void)
+{
+    fprintf(stderr, "shelbourne: restarting stock processes...\n");
+    /* SIGKILL the frozen shepherdd — SIGCONT would let it wake up and
+     * trigger crash-recovery reboot (critical daemons like APServer and
+     * BoseApp are configured with recovery="reboot").  SIGKILL is
+     * delivered to stopped processes immediately. */
+    system("kill -9 $(pidof shepherdd) 2>/dev/null");
+    sleep(2);
+    system("/etc/init.d/SoundTouch start 2>/dev/null");
 }
 
 /* ── Audio DMA start ──────────────────────────────────────────────── */
@@ -355,13 +416,15 @@ shelbourne_t *shelbourne_init(void)
     hw->fb_fd = -1;
     hw->keypad_fd = -1;
 
-    /* Step 1-2: Kill processes */
-    kill_stock_processes();
-
-    /* Step 3: Fix keypad timer */
     fix_keypad_timer();
 
-    /* Step 4: Initialize codec */
+    /* Mute and power off amplifier before codec init — if a previous
+     * process left the amp on, reconfiguring the codec can cause
+     * transients that trigger an amp fault and hardware reset. */
+    write_file(GPIO_MUTE, "0");
+    amp_power_off();
+
+    /* Initialize codec */
     fprintf(stderr, "shelbourne: initializing codec...\n");
     if (codec_init() < 0) {
         fprintf(stderr, "shelbourne: codec init failed\n");
@@ -369,16 +432,16 @@ shelbourne_t *shelbourne_init(void)
         return NULL;
     }
 
-    /* Step 5: Power on amplifier */
+    /* Power on amplifier */
     amp_power_on();
 
-    /* Step 6-7: Start TX mode (clears txRunning, opens device, configures McASP) */
+    /* Start TX mode (clears txRunning, opens device, configures McASP) */
     if (start_tx_mode(hw) < 0) {
         free(hw);
         return NULL;
     }
 
-    /* Step 8: Unmute */
+    /* Unmute */
     write_file(GPIO_MUTE, "1");
 
     /* Step 9: Open display (non-fatal) */
@@ -591,7 +654,7 @@ int shelbourne_volume_to_gain(int volume)
 {
     if (volume <= 0) return 0;
     if (volume >= 100) return 65536;
-    return (int)(65536.0 * pow(10.0, (volume - 100) / 40.0));
+    return (int)(65536.0 * pow(10.0, (volume - 100) / 30.0));
 }
 
 void shelbourne_mute(shelbourne_t *hw, int mute)

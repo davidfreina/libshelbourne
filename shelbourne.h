@@ -89,18 +89,55 @@
 
 typedef struct shelbourne shelbourne_t;
 
+/* ── Stock process management ────────────────────────────────────── */
+
+/*
+ * The stock Bose software holds the audio device and codec open.
+ * These functions let you manage the stock processes so the library
+ * can access the hardware.
+ *
+ * For deployment, the recommended approach is to use the shepherdd
+ * override (place a custom XML in /mnt/nv/shepherd/) so stock
+ * processes never start. In that case, these functions are not needed.
+ *
+ * During development, call shelbourne_stop_stock_processes() before
+ * shelbourne_init(), and shelbourne_resume_stock_processes() after
+ * shelbourne_shutdown() to restore normal operation without rebooting.
+ */
+
+/*
+ * Check if stock audio processes (APServer, BoseApp, etc.) are running.
+ * Returns 1 if any are found, 0 if none are running.
+ */
+int shelbourne_stock_processes_active(void);
+
+/*
+ * Freeze the process supervisor (shepherdd) and kill all stock audio
+ * processes. Safe to call even if they are not running.
+ */
+void shelbourne_stop_stock_processes(void);
+
+/*
+ * Resume the process supervisor, which will restart the stock software.
+ * Call after shelbourne_shutdown() to restore normal device operation.
+ */
+void shelbourne_resume_stock_processes(void);
+
 /* ── Lifecycle ────────────────────────────────────────────────────── */
 
 /*
  * Initialize all hardware. This:
- *   1. Stops competing audio processes
- *   2. Fixes the keypad scan timer (driver workaround)
- *   3. Loads codec firmware via sysfs (falls back to direct register writes)
- *   4. Powers on amplifier via GPIO (includes 3s stabilization delay)
- *   5. Clears txRunning flag in audio driver via /dev/kmem
- *   6. Opens audio device and starts McASP/EDMA
- *   7. Unmutes amplifier
- *   8. Opens OLED display and keypad (non-fatal if missing)
+ *   1. Fixes the keypad scan timer (driver workaround)
+ *   2. Loads codec firmware via sysfs (falls back to direct register writes)
+ *   3. Powers on amplifier via GPIO (includes 3s stabilization delay)
+ *   4. Clears txRunning flag in audio driver via /dev/kmem
+ *   5. Opens audio device and starts McASP/EDMA
+ *   6. Unmutes amplifier
+ *   7. Opens OLED display and keypad (non-fatal if missing)
+ *
+ * The stock Bose processes must not be running — they hold the audio
+ * device open. Either use the shepherdd override to prevent them from
+ * starting, or call shelbourne_stop_stock_processes() first.
  *
  * Returns NULL on fatal error (audio device or codec failure).
  * Display/keypad/LED failures are non-fatal — the corresponding
@@ -113,7 +150,8 @@ shelbourne_t *shelbourne_init(void);
 /*
  * Shut down hardware and free resources.
  * Mutes, clears display, turns off LED, closes all file descriptors.
- * Does NOT kill or resume any processes.
+ * Does NOT resume stock processes — call shelbourne_resume_stock_processes()
+ * separately if desired.
  */
 void shelbourne_shutdown(shelbourne_t *hw);
 
