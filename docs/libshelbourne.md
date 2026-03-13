@@ -167,7 +167,9 @@ Use for mode switches; use software gain for normal volume control.
 ### `void shelbourne_standby(shelbourne_t *hw)`
 
 Enter low-power mode: mute, power off amplifier, blank display, LED off.
-Audio buffer state is preserved. Keypad remains active.
+WiFi stays on. Audio buffer state is preserved. Keypad remains active.
+
+For deeper sleep, call `shelbourne_wifi_set(hw, 0)` after standby.
 
 ### `void shelbourne_resume(shelbourne_t *hw)`
 
@@ -175,6 +177,9 @@ Resume from standby: power on amplifier, unmute, reset audio pacing.
 Returns immediately — the amplifier may produce distorted output for
 the first few seconds while it stabilizes. Caller should redraw display
 after resume.
+
+If WiFi was powered off, call `shelbourne_wifi_set(hw, 1)` before or
+after resume. The WiFi connection takes ~10 seconds to re-establish.
 
 ## Display
 
@@ -206,7 +211,9 @@ Write framebuffer to the OLED. ~5ms.
 
 ## Keypad
 
-10 physical buttons. Events are delivered as press/release pairs.
+10 physical buttons. The driver delivers separate press and release
+events for each button. This lets you detect short presses, long
+presses, and held-key repeats.
 
 ### Button constants
 
@@ -221,13 +228,49 @@ Write framebuffer to the OLED. ~5ms.
 ### `int shelbourne_keypad_poll(shelbourne_t *hw, shelbourne_key_event_t *events, int max_events)`
 
 Non-blocking poll. Returns number of events (0 if none pending).
-Each event has `.key` and `.pressed` (1=press, 0=release).
+Each event has `.key` (which button) and `.pressed` (1=press, 0=release).
 
 ### `int shelbourne_keypad_fd(shelbourne_t *hw)`
 
-Get the keypad file descriptor for use with `select()`/`poll()`. Useful
-for sleeping efficiently until a button is pressed (e.g., during
-standby).
+Get the keypad file descriptor for use with `select()`/`poll()`. When
+`select()` signals readability, call `shelbourne_keypad_poll()` to get
+decoded events. Do not `read()` from the fd directly.
+
+### Long press detection
+
+The hardware does not generate repeat or long-press events. Detect
+them by recording the press timestamp and checking elapsed time:
+
+```c
+struct timespec press_time;
+int power_held = 0;
+
+/* In your event handler: */
+if (ev.key == SHELBOURNE_KEY_POWER) {
+    if (ev.pressed) {
+        power_held = 1;
+        clock_gettime(CLOCK_MONOTONIC, &press_time);
+    } else {
+        if (power_held && elapsed_ms(&press_time) < 2000)
+            short_press_action();
+        power_held = 0;
+    }
+}
+
+/* In your main loop (polled every ~10-50ms): */
+if (power_held && elapsed_ms(&press_time) >= 2000) {
+    long_press_action();
+    power_held = 0;  /* don't re-trigger */
+}
+```
+
+## WiFi
+
+### `void shelbourne_wifi_set(shelbourne_t *hw, int on)`
+
+Control the DM870 WiFi/Bluetooth module power. `on=1` powers on
+(default after init), `on=0` powers off. After powering back on, the
+WiFi connection takes ~10 seconds to re-establish.
 
 ## LED
 

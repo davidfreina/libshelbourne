@@ -694,6 +694,14 @@ void shelbourne_resume(shelbourne_t *hw)
     hw->in_standby = 0;
 }
 
+/* ── WiFi ────────────────────────────────────────────────────────── */
+
+void shelbourne_wifi_set(shelbourne_t *hw, int on)
+{
+    (void)hw;
+    write_file(GPIO_DM870_POWER, on ? "0" : "1");  /* active low */
+}
+
 /* ── Display ──────────────────────────────────────────────────────── */
 
 void shelbourne_display_clear(shelbourne_t *hw)

@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/select.h>
+#include <time.h>
 #include <unistd.h>
 
 static volatile int running = 1;
@@ -314,6 +315,9 @@ static int volume = 20;
 static int gain;
 static double phase = 0;
 static int display_dirty = 1;
+static int wifi_off = 0;                          /* WiFi powered down in deep standby */
+static struct timespec power_press_time;           /* when power button was pressed */
+static int power_held = 0;                        /* power button is currently held */
 
 static void update_display(void)
 {
@@ -388,6 +392,7 @@ static void enter_idle(void)
 
 static void enter_standby(void)
 {
+    shelbourne_mute(hw, 1);
     saved_state = state;
     saved_preset = current_preset;
     if (state == STATE_AUX)
@@ -398,8 +403,20 @@ static void enter_standby(void)
     printf("Standby\n");
 }
 
+static void wifi_off_standby(void)
+{
+    shelbourne_wifi_set(hw, 0);
+    wifi_off = 1;
+    printf("WiFi off (deep standby)\n");
+}
+
 static void leave_standby(void)
 {
+    if (wifi_off) {
+        shelbourne_wifi_set(hw, 1);
+        wifi_off = 0;
+        printf("WiFi on\n");
+    }
     shelbourne_resume(hw);
     state = STATE_IDLE;
     display_dirty = 1;
@@ -482,13 +499,35 @@ static void handle_key(shelbourne_key_t key)
     }
 }
 
+static long power_held_ms(void)
+{
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (now.tv_sec - power_press_time.tv_sec) * 1000L +
+           (now.tv_nsec - power_press_time.tv_nsec) / 1000000L;
+}
+
 static void poll_keys(void)
 {
     shelbourne_key_event_t events[8];
     int n = shelbourne_keypad_poll(hw, events, 8);
-    for (int i = 0; i < n; i++)
+    for (int i = 0; i < n; i++) {
+        if (events[i].key == SHELBOURNE_KEY_POWER) {
+            if (events[i].pressed) {
+                power_held = 1;
+                clock_gettime(CLOCK_MONOTONIC, &power_press_time);
+            } else {
+                power_held = 0;
+            }
+        }
         if (events[i].pressed)
             handle_key(events[i].key);
+    }
+
+    /* In standby, holding power for 2s turns off WiFi */
+    if (state == STATE_STANDBY && power_held && !wifi_off &&
+        power_held_ms() >= 2000)
+        wifi_off_standby();
 }
 
 /* ── Main ──────────────────────────────────────────────────────── */
