@@ -11,7 +11,7 @@ Build the library, demo, and test suite, prepare a device, and run them.
 ## 1. Clone and Build
 
 ```
-git clone <repo-url> libshelbourne
+git clone https://github.com/ljosa/libshelbourne.git
 cd libshelbourne
 make
 ```

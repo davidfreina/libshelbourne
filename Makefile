@@ -1,5 +1,5 @@
 IMAGE  = shelbourne-build
-DEVICE ?= 192.168.2.42
+
 CC      = arm-linux-gnueabihf-gcc
 CFLAGS  = -static -O2 -Wall -Wextra
 
@@ -17,6 +17,9 @@ all: docker
 	@echo "Built: build/demo build/shelbourne-test"
 
 deploy: all
+ifndef DEVICE
+	$(error DEVICE not set. Usage: make deploy DEVICE=<device-ip>)
+endif
 	scp build/demo build/shelbourne-test root@$(DEVICE):/tmp/
 	@echo "Deployed to $(DEVICE):/tmp/"
 
