@@ -33,9 +33,9 @@
 #define CODEC_PROC        "/proc/snd_aic3256"
 #define CODEC_CFG_NAME    "spotty_scm_normal.cfg"
 
-#define GPIO_MUTE         "/sys/class/gpio/gpio49/value"
-#define GPIO_AMP_POWER    "/sys/class/gpio/gpio55/value"
-#define GPIO_DM870_POWER  "/sys/class/gpio/gpio14/value"
+#define GPIO_MUTE         "/dev/gpiodev/mute_out"
+#define GPIO_AMP_POWER    "/dev/gpiodev/ampstby"
+#define GPIO_DM870_POWER  "/dev/gpiodev/psm_disable"
 
 /* ── Internal buffer size ─────────────────────────────────────────── */
 
@@ -238,8 +238,8 @@ static void amp_power_off(void)
 
 static void clear_tx_running(void)
 {
-    FILE *f = fopen("/sys/module/snd_shelby/sections/.bss", "r");
-    if (!f) { fprintf(stderr, "shelbourne: cannot read snd_shelby BSS\n"); return; }
+    FILE *f = fopen("/sys/module/snd_shelby2/sections/.bss", "r");
+    if (!f) { fprintf(stderr, "shelbourne: cannot read snd_shelby2 BSS\n"); return; }
     unsigned long bss_base;
     if (fscanf(f, "0x%lx", &bss_base) != 1) { fclose(f); return; }
     fclose(f);
