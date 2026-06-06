@@ -20,7 +20,7 @@ deploy: all
 ifndef DEVICE
 	$(error DEVICE not set. Usage: make deploy DEVICE=<device-ip>)
 endif
-	scp build/demo build/shelbourne-test root@$(DEVICE):/tmp/
+	scp -O -o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa build/demo build/shelbourne-test root@$(DEVICE):/tmp/
 	@echo "Deployed to $(DEVICE):/tmp/"
 
 clean:
