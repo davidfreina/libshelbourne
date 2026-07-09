@@ -31,11 +31,67 @@
 #define CODEC_CFG_SYSFS   "/sys/class/sound/snd_aic3256/configured"
 #define CODEC_FILE_SYSFS  "/sys/class/sound/snd_aic3256/configuredFile"
 #define CODEC_PROC        "/proc/snd_aic3256"
-#define CODEC_CFG_NAME    "spotty_scm_normal.cfg"
 
 #define GPIO_MUTE         "/dev/gpiodev/mute_out"
 #define GPIO_AMP_POWER    "/dev/gpiodev/ampstby"
 #define GPIO_DM870_POWER  "/dev/gpiodev/psm_disable"
+
+/* ── Device detection ─────────────────────────────────────────────── */
+
+/*
+ * Codec firmware config filenames, one per supported device.
+ * These live in /lib/firmware/ and configure the TLV320AIC3256 for the
+ * speaker enclosure's specific EQ tuning. Exactly one file should exist
+ * on any given device, which is how we identify the hardware at runtime.
+ *
+ * Build-time override: pass -DSHELBOURNE_DEVICE_SPOTTY or
+ * -DSHELBOURNE_DEVICE_RHINO to skip detection and hard-code the target.
+ */
+typedef enum {
+    SHELBOURNE_DEV_SPOTTY = 0,  /* SoundTouch 20 */
+    SHELBOURNE_DEV_RHINO,       /* SoundTouch 10 */
+    SHELBOURNE_DEV_COUNT
+} shelbourne_dev_t;
+
+static const char *const codec_cfg_by_dev[SHELBOURNE_DEV_COUNT] = {
+    [SHELBOURNE_DEV_SPOTTY] = "spotty_scm_normal.cfg",
+    [SHELBOURNE_DEV_RHINO]  = "rhino_sm2_normal.cfg",
+};
+
+static const char *const dev_name[SHELBOURNE_DEV_COUNT] = {
+    [SHELBOURNE_DEV_SPOTTY] = "SoundTouch 20 (spotty)",
+    [SHELBOURNE_DEV_RHINO]  = "SoundTouch 10 (rhino)",
+};
+
+/* Resolved once by shelbourne_init(); all subsequent calls read this. */
+static shelbourne_dev_t g_device = SHELBOURNE_DEV_SPOTTY;
+
+static shelbourne_dev_t detect_device(void)
+{
+#if defined(SHELBOURNE_DEVICE_SPOTTY)
+    fprintf(stderr, "shelbourne: device forced to %s at build time\n",
+            dev_name[SHELBOURNE_DEV_SPOTTY]);
+    return SHELBOURNE_DEV_SPOTTY;
+#elif defined(SHELBOURNE_DEVICE_RHINO)
+    fprintf(stderr, "shelbourne: device forced to %s at build time\n",
+            dev_name[SHELBOURNE_DEV_RHINO]);
+    return SHELBOURNE_DEV_RHINO;
+#else
+    /* Probe /lib/firmware/ for each device's codec tuning file. */
+    int i;
+    for (i = 0; i < SHELBOURNE_DEV_COUNT; i++) {
+        char path[128];
+        snprintf(path, sizeof(path), "/lib/firmware/%s", codec_cfg_by_dev[i]);
+        if (access(path, R_OK) == 0) {
+            fprintf(stderr, "shelbourne: detected %s\n", dev_name[i]);
+            return (shelbourne_dev_t)i;
+        }
+    }
+    fprintf(stderr, "shelbourne: device detection failed, defaulting to %s\n",
+            dev_name[SHELBOURNE_DEV_SPOTTY]);
+    return SHELBOURNE_DEV_SPOTTY;
+#endif
+}
 
 /* ── Internal buffer size ─────────────────────────────────────────── */
 
@@ -121,7 +177,7 @@ static int codec_init_sysfs(void)
             usleep(10000);
         }
 
-        write_file(CODEC_FILE_SYSFS, CODEC_CFG_NAME);
+        write_file(CODEC_FILE_SYSFS, codec_cfg_by_dev[g_device]);
 
         int loaded = 0;
         for (int i = 0; i < 200; i++) {
@@ -149,9 +205,11 @@ static int codec_init_sysfs(void)
 
 static int codec_init_direct(void)
 {
-    FILE *f = fopen("/lib/firmware/" CODEC_CFG_NAME, "r");
+    char cfg_path[128];
+    snprintf(cfg_path, sizeof(cfg_path), "/lib/firmware/%s", codec_cfg_by_dev[g_device]);
+    FILE *f = fopen(cfg_path, "r");
     if (!f) {
-        fprintf(stderr, "shelbourne: cannot open /lib/firmware/%s\n", CODEC_CFG_NAME);
+        fprintf(stderr, "shelbourne: cannot open %s\n", cfg_path);
         return -1;
     }
 
@@ -202,15 +260,44 @@ static int codec_init_direct(void)
     return -1;
 }
 
+/*
+ * Enable the miniDSP audio path.
+ *
+ * The *_normal.cfg firmware loads the DSP's primary input-mixer volume
+ * coefficient (page 0x2c, register 0x10) as zero on some enclosures — notably
+ * rhino (SoundTouch 10) — which multiplies all audio by 0 inside the DSP and
+ * produces total silence even though the codec, DAC and amplifier are fully
+ * configured. The stock firmware sets this coefficient at runtime rather than
+ * in the config (see /etc/init.d/dce_test_worker.sh: `aic cw 2c 10 400000`).
+ * spotty's config already ships it non-zero, which is why spotty plays and
+ * rhino did not.
+ *
+ * Write the stock unity coefficient so audio passes through the DSP; playback
+ * volume is applied separately in software by the caller. The value 0x400000
+ * is a 24-bit coefficient (the codec proc "cw" interface takes 24-bit values).
+ */
+static void codec_enable_dsp_output(void)
+{
+    write_file(CODEC_PROC, "cw 2c 10 400000");
+    write_file(CODEC_PROC, "cw 2c 14 000000");
+    fprintf(stderr, "shelbourne: DSP output coefficient set\n");
+}
+
 static int codec_init(void)
 {
     write_file(GPIO_MUTE, "0");
 
-    if (codec_init_sysfs() == 0)
-        return 0;
+    int rc;
+    if (codec_init_sysfs() == 0) {
+        rc = 0;
+    } else {
+        fprintf(stderr, "shelbourne: sysfs firmware load failed, trying direct writes...\n");
+        rc = codec_init_direct();
+    }
 
-    fprintf(stderr, "shelbourne: sysfs firmware load failed, trying direct writes...\n");
-    return codec_init_direct();
+    if (rc == 0)
+        codec_enable_dsp_output();
+    return rc;
 }
 
 /* ── Amplifier control ────────────────────────────────────────────── */
@@ -244,7 +331,16 @@ static void clear_tx_running(void)
     if (fscanf(f, "0x%lx", &bss_base) != 1) { fclose(f); return; }
     fclose(f);
 
-    unsigned long addr = bss_base + 0xec;
+    /*
+     * txRunning is the guard flag snd_shelby_start_tx() checks before
+     * starting the McASP TX EDMA: if it is non-zero, start_tx early-returns
+     * and the DMA is never (re)started, so the next write() to the audio
+     * device blocks forever. It lives at BSS+0xe4 in the snd_shelby2 module
+     * (verified by disassembly on both sm2 devices; the previous 0xec pointed
+     * at an unrelated variable). A clean close() clears it, but an unclean
+     * exit (crash/SIGKILL) leaves it set, wedging the next run.
+     */
+    unsigned long addr = bss_base + 0xe4;
     int fd = open("/dev/kmem", O_RDWR);
     if (fd < 0) { fprintf(stderr, "shelbourne: cannot open /dev/kmem\n"); return; }
 
@@ -419,6 +515,8 @@ shelbourne_t *shelbourne_init(void)
     hw->aux_read_fd = -1;
     hw->fb_fd = -1;
     hw->keypad_fd = -1;
+
+    g_device = detect_device();
 
     fix_keypad_timer();
 
