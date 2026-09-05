@@ -598,10 +598,28 @@ int shelbourne_audio_write(shelbourne_t *hw, const int32_t *samples, int frames)
     return 0;
 }
 
+/*
+ * Wall-clock pacing switch.
+ *
+ * When enabled (default, legacy behaviour) shelbourne_audio_wait() throttles
+ * writes to a nominal 48 kHz using CLOCK_MONOTONIC. That is a *software* clock
+ * and it does not track the DAC crystal, so the two slowly diverge and any
+ * synchronised protocol on top has to keep correcting the drift.
+ *
+ * When disabled, pacing comes solely from write() blocking on DMA back-pressure,
+ * i.e. the true hardware rate.
+ */
+static int g_wallclock_pacing = 1;
+
+void shelbourne_audio_set_pacing(int enabled)
+{
+    g_wallclock_pacing = enabled ? 1 : 0;
+}
+
 int shelbourne_audio_wait(shelbourne_t *hw)
 {
     while (hw->outbuf_fill >= SHELBOURNE_FRAMES_PER_WRITE) {
-        if (hw->flush_started) {
+        if (hw->flush_started && g_wallclock_pacing) {
             struct timespec now;
             clock_gettime(CLOCK_MONOTONIC, &now);
             long wait_us = (hw->flush_next.tv_sec - now.tv_sec) * 1000000L +
